@@ -69,7 +69,7 @@ class new_LIFNode(neuron.LIFNode):
 # 输入：突触前膜的脉冲， 输出：激发/抑制，突触权重，电流x
 class Synapse(nn.Module):
     def __init__(self, in_features = 400, out_features = 400, lr = 1e-2):
-        super(Synapse, self).__init__()
+        super().__init__()
         self.module = nn.Linear(in_features, out_features, bias = False)
         self.stdp_learner = layer.STDPLearner(100., 100., self.f_pre, self.f_post)
         self.lr = lr
@@ -90,7 +90,7 @@ class Synapse(nn.Module):
 
 class Net(nn.Module):
     def __init__(self, lr, device='cpu'):
-        super(Net, self).__init__()
+        super().__init__()
         self.input_node = new_LIFNode(hidden_size = 784, device=device)
         self.excit_node = new_LIFNode(hidden_size = 400, device=device)
         self.inhib_node = new_LIFNode(hidden_size = 400, device=device)
