@@ -53,7 +53,6 @@ class new_LIFNode(neuron.LIFNode):
 
     def neuronal_fire(self):
         return (self.v > self.v_threshold).float()
-        # return self.surrogate_function(self.v - self.v_threshold)
 
     def neuronal_reset(self, spike):
         if self.detach_reset:
@@ -101,16 +100,15 @@ class Synapse(nn.Module):
     def update(self, spike_pre, spike_post):
         self.stdp_learner.stdp(spike_pre, spike_post, self.weight, self.lr)
 
-
 class Net(nn.Module):
     def __init__(self, lr=0.02, device='cpu'):
         super().__init__()
         # self.input_node = new_LIFNode(hidden_size = 784, device=device)
         self.excit_node = new_LIFNode(hidden_size = 400, device=device)
         self.inhib_node = new_LIFNode(hidden_size = 400, device=device)
-        self.synapse_1 = Synapse(784, 400, lr)
-        self.synapse_2 = Synapse(400, 400, lr)
-        self.synapse_3 = Synapse(400, 400, lr)
+        self.synapse_1 = Synapse(784, 400, lr=lr, device = device)
+        self.synapse_2 = Synapse(400, 400, lr=lr, device = device)
+        self.synapse_3 = Synapse(400, 400, lr=lr, device = device)
 
     def forward(self, x, t):
         # self.spike_1 = self.input_node(x, x)
@@ -200,7 +198,7 @@ if __name__ == '__main__':
     )
 
     # 定义并初始化网络，待完成
-    model = Net(device)
+    model = Net(lr=lr, device=device)
     model.to(device)
 
     # 使用泊松编码
@@ -217,9 +215,8 @@ if __name__ == '__main__':
             label_one_hot = F.one_hot(label, 10).float()
 
             for t in range(T):
-                print(t)
                 encoded_img = encoder(img).float()
                 # print(encoded_img, encoded_img.shape)
                 # print(label)
-                model(encoded_img.reshape((784,)), t=t)
-                # model.update()
+                output = model(encoded_img.reshape((784,)), t=t)
+                model.update()
