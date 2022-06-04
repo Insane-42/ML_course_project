@@ -37,13 +37,12 @@ class new_LIFNode(neuron.LIFNode):
                  v_rest: float=-65., E_exc : float = 0., E_inh : float = -100.,
                  hidden_size = 400, device='cpu'):
         assert isinstance(tau, float) and tau > 1.
-        # assert isinstance(tau, float)
         super().__init__(tau, decay_input, v_threshold, v_reset, surrogate_function, detach_reset)
         self.tau = tau
         self.decay_input = decay_input
         self.v_rest = v_rest
         v_init_val = v_rest
-        self.v = torch.tensor(np.ones(shape=(hidden_size,), dtype=float)*v_init_val).to(device)
+        self.v = torch.tensor(np.ones(shape=(hidden_size,), dtype=np.float64)*v_init_val).to(device)
         self.E_exc = E_exc
         self.E_inh = E_inh
 
@@ -52,7 +51,7 @@ class new_LIFNode(neuron.LIFNode):
         self.v = self.v + ((self.v_rest - self.v) + ge_averaged * (self.E_exc - self.v) + gi_average * (self.E_inh - self.v)) / self.tau 
 
     def neuronal_fire(self):
-        return (self.v > self.v_threshold).float()
+        return (self.v > self.v_threshold).double()
 
     def neuronal_reset(self, spike):
         if self.detach_reset:
@@ -75,20 +74,33 @@ class new_LIFNode(neuron.LIFNode):
 # 突触记录连接权重（使用STDP_layer更新权重）,区分为激发性突触和抑制性突触
 # 输入：突触前膜的脉冲， 输出：激发/抑制，突触权重，电流x
 class Synapse(nn.Module):
-    def __init__(self, in_features = 400, out_features = 400, lr = 1e-2, device = 'cpu'):
+    def __init__(self, in_features = 400, out_features = 400, pre_type = 'e', lr = 1e-2, device = 'cpu'):
         super().__init__()
         self.weight = nn.Linear(in_features, out_features, bias = False).to(device)
-        self.ge = nn.Linear(in_features, out_features, bias = False).to(device)
-        self.gi = nn.Linear(in_features, out_features, bias = False).to(device)
+        self.ge = torch.tensor(np.ones(shape=(out_features, in_features))*1.0).to(device)
+        self.gi = torch.tensor(np.ones(shape=(out_features, in_features))*1.0).to(device)
         self.stdp_learner = layer.STDPLearner(100., 100., self.f_pre, self.f_post)
         self.lr = lr
+        self.pre_type = pre_type
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.uniform_(self.weight.weight, a=0.0, b=1.0)
 
     def forward(self, input_spike, t):
         # # update g_e, g_i
-        # self.ge = 
-        # self.gi = 
-        ge_averaged = self.ge(input_spike)
-        gi_averaged = self.gi(input_spike)
+        # ge and gi decay with time
+        # self.ge.weight *= (1-input_spike)*(1-1/1)
+        # self.gi.weight *= (1-input_spike)*(1-1/2)
+        # 根据前一个神经元的种类判断更新ge还是gi，对应位相乘，mask掉没有脉冲的突触权重
+        # spike*(g+w)+(1-spike)*g*衰减系数
+        mask = input_spike.unsqueeze(0) # (1, 768)
+        if self.pre_type == "e":
+            self.ge = mask*(self.ge+self.weight.weight)+(1.0-mask)*self.ge*(1.0-1.0/1)
+        else:
+            self.gi = mask*(self.gi+self.weight.weight)+(1.0-mask)*self.gi*(1.0-1.0/2)
+        ge_averaged = torch.matmul(self.ge, input_spike)
+        gi_averaged = torch.matmul(self.gi, input_spike)
         return ge_averaged, gi_averaged
 
     def f_pre(self, x):
@@ -101,14 +113,14 @@ class Synapse(nn.Module):
         self.stdp_learner.stdp(spike_pre, spike_post, self.weight, self.lr)
 
 class Net(nn.Module):
-    def __init__(self, lr=0.02, device='cpu'):
+    def __init__(self, hidden=400, lr=0.02, device='cpu'):
         super().__init__()
         # self.input_node = new_LIFNode(hidden_size = 784, device=device)
-        self.excit_node = new_LIFNode(hidden_size = 400, device=device)
-        self.inhib_node = new_LIFNode(hidden_size = 400, device=device)
-        self.synapse_1 = Synapse(784, 400, lr=lr, device = device)
-        self.synapse_2 = Synapse(400, 400, lr=lr, device = device)
-        self.synapse_3 = Synapse(400, 400, lr=lr, device = device)
+        self.excit_node = new_LIFNode(tau=100., v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size = hidden, device=device)
+        self.inhib_node = new_LIFNode(tau=10., v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size = hidden, device=device)
+        self.synapse_1 = Synapse(784, hidden, lr=lr, device = device)
+        self.synapse_2 = Synapse(hidden, hidden, lr=lr, device = device)
+        self.synapse_3 = Synapse(hidden, hidden, lr=lr, device = device)
 
     @torch.no_grad()
     def forward(self, x, t):
@@ -117,6 +129,10 @@ class Net(nn.Module):
         self.spike_2 = self.excit_node(*self.synapse_1(self.spike_1, t))
         self.spike_3 = self.inhib_node(*self.synapse_2(self.spike_2, t))
         self.spike_4 = self.excit_node(*self.synapse_3(self.spike_3, t))
+        # print(self.spike_1)
+        # print(self.spike_2)
+        # print(self.spike_3)
+        # print(self.spike_4)
         return self.spike_2
     
     def update(self):
@@ -199,7 +215,7 @@ if __name__ == '__main__':
     )
 
     # 定义并初始化网络，待完成
-    model = Net(lr=lr, device=device)
+    model = Net(hidden=400, lr=lr, device=device)
     model.to(device)
 
     # 使用泊松编码
@@ -213,10 +229,10 @@ if __name__ == '__main__':
             # 获取图片和对应的one-hot标签
             img = img.to(device)
             label = label.to(device)
-            label_one_hot = F.one_hot(label, 10).float()
+            label_one_hot = F.one_hot(label, 10).double()
 
             for t in range(T):
-                encoded_img = encoder(img).float()
+                encoded_img = encoder(img).double()
                 # print(encoded_img, encoded_img.shape)
                 # print(label)
                 output = model(encoded_img.reshape((784,)), t=t)
