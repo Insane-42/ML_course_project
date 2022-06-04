@@ -22,20 +22,14 @@ class new_LIFNode(neuron.LIFNode):
         self.tau = tau
         self.decay_input = decay_input
         self.v_rest = v_rest
-        ge_init_val = 1.
-        gi_init_val = 1.
         v_init_val = 1.
-        self.ge = torch.tensor(np.ones(shape=(hidden_size,), dtype=float)*ge_init_val).to(device)
-        self.gi = torch.tensor(np.ones(shape=(hidden_size,), dtype=float)*gi_init_val).to(device)
         self.v = torch.tensor(np.ones(shape=(hidden_size,), dtype=float)*v_init_val).to(device)
         self.E_exc = E_exc
         self.E_inh = E_inh
 
-        self.cupy_fp32_inference = cupy_fp32_inference
-
-    def neuronal_charge(self, x: torch.Tensor):
+    def neuronal_charge(self, ge_averaged, gi_average):
         # 充电公式，见文中公式(1)，与源代码中neuron_eqs_e, neuron_eqs_i
-        self.v = self.v + ((self.v_rest - self.v) + self.ge * (self.E_exc - self.v) + self.gi * (self.E_inh - self.v) + x) / self.tau 
+        self.v = self.v + ((self.v_rest - self.v) + ge_averaged * (self.E_exc - self.v) + gi_average * (self.E_inh - self.v)) / self.tau 
 
     def neuronal_fire(self):
         return (self.v > self.v_threshold).float()
@@ -46,21 +40,15 @@ class new_LIFNode(neuron.LIFNode):
             spike_d = spike.detach()
         else:
             spike_d = spike
-
         if self.v_reset is None:
             # soft reset
             self.v = self.v - spike_d * self.v_threshold
-
         else:
             # hard reset
             self.v = (1. - spike_d) * self.v + spike_d * self.v_reset
 
-    def forward(self, x, weight, t):
-        # # adjust ge and gi according to t and weight
-        # self.ge = ge
-        # self.gi = gi
-
-        self.neuronal_charge(x)
+    def forward(self, ge_averaged, gi_averaged):
+        self.neuronal_charge(ge_averaged, gi_averaged)
         spike = self.neuronal_fire()
         self.neuronal_reset(spike)
         return spike
@@ -68,15 +56,21 @@ class new_LIFNode(neuron.LIFNode):
 # 突触记录连接权重（使用STDP_layer更新权重）,区分为激发性突触和抑制性突触
 # 输入：突触前膜的脉冲， 输出：激发/抑制，突触权重，电流x
 class Synapse(nn.Module):
-    def __init__(self, in_features = 400, out_features = 400, lr = 1e-2):
+    def __init__(self, in_features = 400, out_features = 400, lr = 1e-2, device = 'cpu'):
         super().__init__()
-        self.module = nn.Linear(in_features, out_features, bias = False)
+        self.module = nn.Linear(in_features, out_features, bias = False).to(device)
+        self.ge = nn.Linear(in_features, out_features, bias = False).to(device)
+        self.gi = nn.Linear(in_features, out_features, bias = False).to(device)
         self.stdp_learner = layer.STDPLearner(100., 100., self.f_pre, self.f_post)
         self.lr = lr
 
-    def forward(self, input_spike):
-        average_weighted_spike = self.module(input_spike)
-        return average_weighted_spike, self.module.weight
+    def forward(self, input_spike, t):
+        # # update g_e, g_i
+        # self.ge = 
+        # self.gi = 
+        ge_averaged = self.ge(input_spike)
+        gi_averaged = self.gi(input_spike)
+        return ge_averaged, gi_averaged
 
     def f_pre(self, x):
         return x.abs() + 0.1
@@ -100,9 +94,9 @@ class Net(nn.Module):
 
     def forward(self, x, t):
         self.spike_1 = self.input_node(x)
-        self.spike_2 = self.excit_node(self.synapse_1(self.spike_1), t)
-        self.spike_3 = self.inhib_node(self.synapse_2(self.spike_2), t)
-        self.spike_4 = self.excit_node(self.synapse_3(self.spike_3), t)
+        self.spike_2 = self.excit_node(self.synapse_1(self.spike_1, t))
+        self.spike_3 = self.inhib_node(self.synapse_2(self.spike_2, t))
+        self.spike_4 = self.excit_node(self.synapse_3(self.spike_3, t))
         return self.spike_2
     
     def update(self):
