@@ -25,7 +25,7 @@ parser.add_argument('--dataset-dir', default='./', help='保存MNIST数据集的
 parser.add_argument('--model-output-dir', default='./', help='模型保存路径，例如“./”\n Model directory for saving, e.g., "./"')
 
 parser.add_argument('-b', '--batch-size', default=1, type=int, help='Batch 大小，例如“64”\n Batch size, e.g., "64"')
-parser.add_argument('-T', '--timesteps', default=100, type=int, dest='T', help='仿真时长，例如“100”\n Simulating timesteps, e.g., "100"')
+parser.add_argument('-T', '--timesteps', default=150, type=int, dest='T', help='仿真时长，例如“100”\n Simulating timesteps, e.g., "100"')
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, metavar='LR', help='学习率，例如“1e-3”\n Learning rate, e.g., "1e-3": ', dest='lr')
 parser.add_argument('-N', '--epoch', default=100, type=int, help='训练epoch，例如“100”\n Training epoch, e.g., "100"')
 
@@ -42,13 +42,15 @@ class new_LIFNode(neuron.LIFNode):
         self.decay_input = decay_input
         self.v_rest = v_rest
         v_init_val = v_rest
-        self.v = torch.tensor(np.ones(shape=(hidden_size,), dtype=np.float64)*v_init_val).to(device)
+        self.v = torch.tensor(np.ones(shape=(hidden_size,))*v_init_val).to(device)
         self.E_exc = E_exc
         self.E_inh = E_inh
 
     def neuronal_charge(self, ge_averaged, gi_average):
+        # print(self.v, ge_averaged, gi_average)
         # 充电公式，见文中公式(1)，与源代码中neuron_eqs_e, neuron_eqs_i
         self.v = self.v + ((self.v_rest - self.v) + ge_averaged * (self.E_exc - self.v) + gi_average * (self.E_inh - self.v)) / self.tau 
+        # print(self.v)
 
     def neuronal_fire(self):
         return (self.v > self.v_threshold).double()
@@ -77,8 +79,8 @@ class Synapse(nn.Module):
     def __init__(self, in_features = 400, out_features = 400, pre_type = 'e', lr = 1e-2, device = 'cpu'):
         super().__init__()
         self.weight = nn.Linear(in_features, out_features, bias = False).to(device)
-        self.ge = torch.tensor(np.ones(shape=(out_features, in_features))*1.0).to(device)
-        self.gi = torch.tensor(np.ones(shape=(out_features, in_features))*1.0).to(device)
+        self.ge = torch.tensor(np.ones(shape=(out_features, in_features))*0.1).to(device)
+        self.gi = torch.tensor(np.ones(shape=(out_features, in_features))*0.1).to(device)
         self.stdp_learner = layer.STDPLearner(100., 100., self.f_pre, self.f_post)
         self.lr = lr
         self.pre_type = pre_type
@@ -116,8 +118,8 @@ class Net(nn.Module):
     def __init__(self, hidden=400, lr=0.02, device='cpu'):
         super().__init__()
         # self.input_node = new_LIFNode(hidden_size = 784, device=device)
-        self.excit_node = new_LIFNode(tau=100., v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size = hidden, device=device)
-        self.inhib_node = new_LIFNode(tau=10., v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size = hidden, device=device)
+        self.excit_node = new_LIFNode(tau=100.*1000, v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size = hidden, device=device)
+        self.inhib_node = new_LIFNode(tau=10.*1000, v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size = hidden, device=device)
         self.synapse_1 = Synapse(784, hidden, lr=lr, device = device)
         self.synapse_2 = Synapse(hidden, hidden, lr=lr, device = device)
         self.synapse_3 = Synapse(hidden, hidden, lr=lr, device = device)
@@ -143,33 +145,33 @@ class Net(nn.Module):
 
 
 
-# 基本单位: ms, mV，激发性和抑制性神经元
-neuron_e = new_LIFNode(tau=100., v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size=1)
-neuron_i = new_LIFNode(tau=10., v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size=1)
+# # 基本单位: ms, mV，激发性和抑制性神经元
+# neuron_e = new_LIFNode(tau=100., v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size=1)
+# neuron_i = new_LIFNode(tau=10., v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size=1)
 
-# ge和gi衰减速率
-tau_e = 1
-tau_i = 2
-ge = 1
-gi = 1
-# 时间相关，基本单位:ms
-single_example_time = 350  # 跑一个example的时间
-resting_time = 150         # 重置电位所需时间
+# # ge和gi衰减速率
+# tau_e = 1
+# tau_i = 2
+# ge = 1
+# gi = 1
+# # 时间相关，基本单位:ms
+# single_example_time = 350  # 跑一个example的时间
+# resting_time = 150         # 重置电位所需时间
 
 
-# neuron_e.reset()
-x = torch.as_tensor([2.])
-T = 150
-s_list = []
-v_list = []
+# # neuron_e.reset()
+# x = torch.as_tensor([2.])
+# T = 150
+# s_list = []
+# v_list = []
 
-for t in range(T):
-    # ge and gi 随时间衰减
-    ge = ge*(1-1/tau_e)
-    gi = gi*(1-1/tau_i)
+# for t in range(T):
+#     # ge and gi 随时间衰减
+#     ge = ge*(1-1/tau_e)
+#     gi = gi*(1-1/tau_i)
 
-    s_list.append(neuron_e(ge, gi))
-    v_list.append(neuron_e.v)
+#     s_list.append(neuron_e(ge, gi))
+#     v_list.append(neuron_e.v)
 
 
 if __name__ == '__main__':
