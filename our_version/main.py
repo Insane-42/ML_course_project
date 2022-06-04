@@ -110,6 +110,7 @@ class Net(nn.Module):
         self.synapse_2 = Synapse(400, 400, lr=lr, device = device)
         self.synapse_3 = Synapse(400, 400, lr=lr, device = device)
 
+    @torch.no_grad()
     def forward(self, x, t):
         # self.spike_1 = self.input_node(x, x)
         self.spike_1 = x
