@@ -1,3 +1,4 @@
+from turtle import update
 import torch
 import torch.nn as nn
 import torchvision
@@ -12,6 +13,7 @@ import torch.nn.init as init
 import argparse
 from tqdm import tqdm
 import torch.nn.functional as F
+import os
 
 
 # 示例命令
@@ -25,9 +27,11 @@ parser.add_argument('--dataset-dir', default='./', help='保存MNIST数据集的
 parser.add_argument('--model-output-dir', default='./', help='模型保存路径，例如“./”\n Model directory for saving, e.g., "./"')
 
 parser.add_argument('-b', '--batch-size', default=1, type=int, help='Batch 大小，例如“64”\n Batch size, e.g., "64"')
-parser.add_argument('-T', '--timesteps', default=150, type=int, dest='T', help='仿真时长，例如“100”\n Simulating timesteps, e.g., "100"')
+parser.add_argument('-T', '--timesteps', default=350, type=int, dest='T', help='仿真时长，例如“100”\n Simulating timesteps, e.g., "100"')
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, metavar='LR', help='学习率，例如“1e-3”\n Learning rate, e.g., "1e-3": ', dest='lr')
-parser.add_argument('-N', '--epoch', default=100, type=int, help='训练epoch，例如“100”\n Training epoch, e.g., "100"')
+parser.add_argument('-N', '--epoch', default=10, type=int, help='训练epoch，例如“100”\n Training epoch, e.g., "100"')
+parser.add_argument('--eval-mode', default=0, type=int, help='Whether to evaluate or train.')
+
 
 
 class new_LIFNode(neuron.LIFNode):
@@ -120,9 +124,9 @@ class Net(nn.Module):
         # self.input_node = new_LIFNode(hidden_size = 784, device=device)
         self.excit_node = new_LIFNode(tau=100.*1000, v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size = hidden, device=device)
         self.inhib_node = new_LIFNode(tau=10.*1000, v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size = hidden, device=device)
-        self.synapse_1 = Synapse(784, hidden, lr=lr, device = device)
-        self.synapse_2 = Synapse(hidden, hidden, lr=lr, device = device)
-        self.synapse_3 = Synapse(hidden, hidden, lr=lr, device = device)
+        self.synapse_1 = Synapse(784, hidden, pre_type='e', lr=lr, device = device)
+        self.synapse_2 = Synapse(hidden, hidden, pre_type='e', lr=lr, device = device)
+        self.synapse_3 = Synapse(hidden, hidden, pre_type='i', lr=lr, device = device)
 
     @torch.no_grad()
     def forward(self, x, t):
@@ -143,43 +147,77 @@ class Net(nn.Module):
         self.synapse_3.update(self.spike_3, self.spike_4)
         return 
 
+# 得到每个神经元对应的类
+def get_new_assignments(result_monitor, input_numbers):
+    n_e = 400
+    assignments = torch.zeros(n_e)
+    input_nums = input_numbers
+    maximum_rate = [0] * n_e    
+    for j in range(10):
+        # input中各个类有多少个sample
+        num_assignments = len(torch.where(input_nums == j)[0])
+        if num_assignments > 0:
+            # 计算对应这个类的平均每个sample的发放频率
+            rate = np.sum(result_monitor[input_nums == j], axis = 0) / num_assignments
+        for i in range(n_e):
+            # 对于每个神经元，计算其发放频率最大的类，作为其assignment
+            if rate[i] > maximum_rate[i]:
+                maximum_rate[i] = rate[i]
+                assignments[i] = j
+    return assignments
+
+# assignments是一个[1,400]的数组，它代表这400个神经元各自assigned到的类是哪个
+def get_recognized_number_ranking(assignments, spike_rates):
+    summed_rates = torch.zeros(10)
+    num_assignments = torch.zeros(10)
+    for i in range(10):
+        num_assignments[i] = len(torch.where(assignments == i)[0])
+        if num_assignments[i] > 0:
+            # 计算某个类的所有神经元的脉冲发放频率
+            summed_rates[i] = torch.sum(spike_rates[assignments == i]) / num_assignments[i]
+    # 获得每个类脉冲发放频率的排序 summed_rates[result[9]]代表最高类的发放频率，summed_rates[results[0]]代表最低类的发放频率,[::-1]代表取倒序
+    return torch.argsort(summed_rates, descending=True)
+
+# 根据目前的outputNumbers得到目前的表现，每一个update_interval在performance里面记录一次
+def get_current_performance(outputNumbers, input_numbers):
+    # current_evaluation = int(current_example_num/update_interval)
+    # start_num = current_example_num - update_interval
+    # end_num = current_example_num
+    difference = outputNumbers[:, 0] - input_numbers[:]
+    correct = len(np.where(difference == 0)[0])
+    performance = correct / len(outputNumbers) * 100
+    return performance
+
+# def get_current_performance(performance, outputNumbers, input_numbers, current_example_num, update_interval):
+#     current_evaluation = int(current_example_num/update_interval)
+#     start_num = current_example_num - update_interval
+#     end_num = current_example_num
+#     difference = outputNumbers[start_num:end_num, 0] - input_numbers[start_num:end_num]
+#     correct = len(np.where(difference == 0)[0])
+#     performance[current_evaluation] = correct / float(update_interval) * 100
+#     return performance
+
+def save_param(model, assignments, path, name):
+    if not os.path.exists(path):
+        os.mkdir(path)
+    state_dict = model.state_dict()
+    state_dict['assignments'] = assignments
+    torch.save(state_dict, os.path.join(path, name))
+    print('Saved parameters to', os.path.join(path, name))
+
+def load_param(model, path, name):
+    state_dict = torch.load(os.path.join(path, name))
+    assignments = state_dict['assignments'].clone()
+    del state_dict['assignments']
+    print('Loaded params:')
+    print(state_dict)
+    print('Loaded assignments:')
+    print(assignments)
+    model.load_state_dict(state_dict)
+    return assignments
 
 
-# # 基本单位: ms, mV，激发性和抑制性神经元
-# neuron_e = new_LIFNode(tau=100., v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size=1)
-# neuron_i = new_LIFNode(tau=10., v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size=1)
-
-# # ge和gi衰减速率
-# tau_e = 1
-# tau_i = 2
-# ge = 1
-# gi = 1
-# # 时间相关，基本单位:ms
-# single_example_time = 350  # 跑一个example的时间
-# resting_time = 150         # 重置电位所需时间
-
-
-# # neuron_e.reset()
-# x = torch.as_tensor([2.])
-# T = 150
-# s_list = []
-# v_list = []
-
-# for t in range(T):
-#     # ge and gi 随时间衰减
-#     ge = ge*(1-1/tau_e)
-#     gi = gi*(1-1/tau_i)
-
-#     s_list.append(neuron_e(ge, gi))
-#     v_list.append(neuron_e.v)
-
-
-if __name__ == '__main__':
-    args = parser.parse_args()
-    print("########## Configurations ##########")
-    print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
-    print("####################################")
-
+def train(args):
     # 根据arg初始化变量
     device = args.device
     dataset_dir = args.dataset_dir
@@ -188,6 +226,8 @@ if __name__ == '__main__':
     lr = args.lr
     T = args.T
     train_epoch = args.epoch
+    param_save_dir = './trained_params/'
+    param_save_name = 'params'
 
      # 初始化数据加载器，需要重新下载数据可以让download=True
     train_dataset = torchvision.datasets.MNIST(
@@ -196,27 +236,14 @@ if __name__ == '__main__':
         transform=torchvision.transforms.ToTensor(),
         download=False
     )
-    test_dataset = torchvision.datasets.MNIST(
-        root=dataset_dir,
-        train=False,
-        transform=torchvision.transforms.ToTensor(),
-        download=False
-    )
-
     train_data_loader = data.DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
         shuffle=True,
         drop_last=True
     )
-    test_data_loader = data.DataLoader(
-        dataset=test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False
-    )
 
-    # 定义并初始化网络，待完成
+    # 定义并初始化网络
     model = Net(hidden=400, lr=lr, device=device)
     model.to(device)
 
@@ -227,15 +254,129 @@ if __name__ == '__main__':
         # 开始训练
         print("Epoch {}:".format(epoch))
         print("Training...")
+        j = 0    # j 记录training sample的数量
+        update_interval = 10000
+        result_monitor = torch.zeros((update_interval, 400)).to(device)   # 记录spike count,只需要记录一个update_interval的即可
+        input_numbers = torch.zeros(60000).to(device)   # 记录输入的数字
+        outputNumbers = torch.zeros((60000, 10)).to(device)  # 记录输出的结果
+        assignments = torch.zeros(400).to(device)
+        # performance = np.zeros(6)  # 60000 / 10000 = 6
+        
         for img, label in tqdm(train_data_loader):
             # 获取图片和对应的one-hot标签
             img = img.to(device)
             label = label.to(device)
-            label_one_hot = F.one_hot(label, 10).double()
 
+            # 仿真一张图片
+            current_spike_count = torch.zeros(400).to(device) # 记录累计的脉冲数量
             for t in range(T):
                 encoded_img = encoder(img).double()
                 # print(encoded_img, encoded_img.shape)
                 # print(label)
                 output = model(encoded_img.reshape((784,)), t=t)
+                current_spike_count += output
                 model.update()
+            
+            # 每隔一个update_interval，更新assignments
+            if j % update_interval == 0 & j > 0:
+                # performance = get_current_performance(performance, outputNumbers, input_numbers, j, update_interval)
+                # print(performance)   # 每10000个sample记录一下performance
+                assignments = get_new_assignments(result_monitor[:], input_numbers[j-update_interval : j])
+            
+            # 得到目前的spike count，训练标签，输出结果
+            result_monitor[j % update_interval,:] = current_spike_count
+            input_numbers[j] = label
+            outputNumbers[j,:] = get_recognized_number_ranking(assignments, result_monitor[j % update_interval,:]) # 得到预测结果
+
+            y_pred = outputNumbers[j,0]
+            print('label:', label[0], 'y_pred:', y_pred)
+
+            # 每个1000张图片保存一次参数
+            if j % 1000 == 0:
+                save_param(model, assignments, param_save_dir, param_save_name+'_%d_%d'%(epoch,j))
+
+            j += 1
+        # 每个epoch输出一次performance
+        performance = get_current_performance(outputNumbers, input_numbers)
+        print(performance)   # 每10000个sample记录一下performance
+
+def test(args):
+    # 根据arg初始化变量
+    device = args.device
+    dataset_dir = args.dataset_dir
+    model_output_dir = args.model_output_dir
+    batch_size = args.batch_size 
+    lr = args.lr
+    T = args.T
+    param_save_dir = './trained_params/'
+    param_save_name = 'params'
+
+     # 初始化数据加载器，需要重新下载数据可以让download=True
+    test_dataset = torchvision.datasets.MNIST(
+        root=dataset_dir,
+        train=False,
+        transform=torchvision.transforms.ToTensor(),
+        download=False
+    )
+    test_data_loader = data.DataLoader(
+        dataset=test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False
+    )
+
+    # 定义并初始化网络
+    model = Net(hidden=400, lr=lr, device=device)
+    model.to(device)
+
+    # 使用泊松编码
+    encoder = encoding.PoissonEncoder()
+
+    load_epoch = 0
+    load_iter = 0
+
+    # 获得训练好的assignments
+    trained_assignments = load_param(model, param_save_dir, param_save_name+'_%d_%d'%(load_epoch,load_iter))
+    result_monitor = torch.zeros((10000, 400)).to(device)   # 记录spike count
+    input_numbers = torch.zeros(10000).to(device)   # 记录输入的数字
+    outputNumbers = torch.zeros((10000, 10)).to(device)  # 记录输出的结果
+    print("Testing...")
+    j = 0
+    for img, label in tqdm(test_data_loader):
+        # 获取图片和对应的one-hot标签
+        img = img.to(device)
+        label = label.to(device)
+
+        # 仿真一张图片
+        current_spike_count = torch.zeros(400).to(device) # 记录累计的脉冲数量
+        for t in range(T):
+            encoded_img = encoder(img).double()
+            # print(encoded_img, encoded_img.shape)
+            # print(label)
+            output = model(encoded_img.reshape((784,)), t=t)
+            current_spike_count += output
+        
+        # 得到目前的spike count，训练标签，输出结果
+        result_monitor[j,:] = current_spike_count
+        input_numbers[j] = label
+        outputNumbers[j,:] = get_recognized_number_ranking(trained_assignments, result_monitor[j,:]) # 得到预测结果
+
+        y_pred = outputNumbers[j,0]
+        print('label:', label[0], 'y_pred:', y_pred)
+        
+        j += 1
+    
+    # 输出performance
+    performance = get_current_performance(outputNumbers, input_numbers)
+    print(performance)
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+    print("########## Configurations ##########")
+    print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
+    print("####################################")
+
+    if args.eval_mode:
+        test(args)
+    else:
+        train(args)
