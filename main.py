@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 parser = argparse.ArgumentParser(description='spikingjelly LIF MNIST Training')
 
-parser.add_argument('--device', default='cpu', help='运行的设备，例如“cpu”或“cuda:0”\n Device, e.g., "cpu" or "cuda:0"')
+parser.add_argument('--device', default='cuda:0', help='运行的设备，例如“cpu”或“cuda:0”\n Device, e.g., "cpu" or "cuda:0"')
 
 parser.add_argument('--dataset-dir', default='./', help='保存MNIST数据集的位置，例如“./”\n Root directory for saving MNIST dataset, e.g., "./"')
 parser.add_argument('--model-output-dir', default='./', help='模型保存路径，例如“./”\n Model directory for saving, e.g., "./"')
@@ -147,7 +147,7 @@ class Net(nn.Module):
 # 得到每个神经元对应的类
 def get_new_assignments(result_monitor, input_numbers):
     n_e = 400
-    assignments = torch.zeros(n_e)
+    assignments = torch.zeros(n_e).to(device)
     input_nums = input_numbers
     maximum_rate = [0] * n_e    
     for j in range(10):
@@ -155,7 +155,7 @@ def get_new_assignments(result_monitor, input_numbers):
         num_assignments = len(torch.where(input_nums == j)[0])
         if num_assignments > 0:
             # 计算对应这个类的平均每个sample的发放频率
-            rate = np.sum(result_monitor[input_nums == j], axis = 0) / num_assignments
+            rate = torch.sum(result_monitor[input_nums == j], axis = 0) / num_assignments
         for i in range(n_e):
             # 对于每个神经元，计算其发放频率最大的类，作为其assignment
             if rate[i] > maximum_rate[i]:
@@ -165,8 +165,8 @@ def get_new_assignments(result_monitor, input_numbers):
 
 # assignments是一个[1,400]的数组，它代表这400个神经元各自assigned到的类是哪个
 def get_recognized_number_ranking(assignments, spike_rates):
-    summed_rates = torch.zeros(10)
-    num_assignments = torch.zeros(10)
+    summed_rates = torch.zeros(10).to(device)
+    num_assignments = torch.zeros(10).to(device)
     for i in range(10):
         num_assignments[i] = len(torch.where(assignments == i)[0])
         if num_assignments[i] > 0:
@@ -184,43 +184,6 @@ def get_current_performance(outputNumbers, input_numbers):
     correct = len(np.where(difference == 0)[0])
     performance = correct / len(outputNumbers) * 100
     return performance
-
-# def get_current_performance(performance, outputNumbers, input_numbers, current_example_num, update_interval):
-#     current_evaluation = int(current_example_num/update_interval)
-#     start_num = current_example_num - update_interval
-#     end_num = current_example_num
-#     difference = outputNumbers[start_num:end_num, 0] - input_numbers[start_num:end_num]
-#     correct = len(np.where(difference == 0)[0])
-#     performance[current_evaluation] = correct / float(update_interval) * 100
-#     return performance
-
-# # 基本单位: ms, mV，激发性和抑制性神经元
-# neuron_e = new_LIFNode(tau=100., v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size=1)
-# neuron_i = new_LIFNode(tau=10., v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size=1)
-
-# # ge和gi衰减速率
-# tau_e = 1
-# tau_i = 2
-# ge = 1
-# gi = 1
-# # 时间相关，基本单位:ms
-# single_example_time = 350  # 跑一个example的时间
-# resting_time = 150         # 重置电位所需时间
-
-
-# # neuron_e.reset()
-# x = torch.as_tensor([2.])
-# T = 150
-# s_list = []
-# v_list = []
-
-# for t in range(T):
-#     # ge and gi 随时间衰减
-#     ge = ge*(1-1/tau_e)
-#     gi = gi*(1-1/tau_i)
-
-#     s_list.append(neuron_e(ge, gi))
-#     v_list.append(neuron_e.v)
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -277,10 +240,10 @@ if __name__ == '__main__':
         print("Training...")
         j = 0    # j 记录training sample的数量
         update_interval = 10000
-        result_monitor = torch.zeros((update_interval, 400))   # 记录spike count,只需要记录一个update_interval的即可
-        input_numbers = torch.zeros(60000)   # 记录输入的数字
-        outputNumbers = torch.zeros((60000, 10))  # 记录输出的结果
-        assignments = torch.zeros(400)
+        result_monitor = torch.zeros((update_interval, 400)).to(device)   # 记录spike count,只需要记录一个update_interval的即可
+        input_numbers = torch.zeros(60000).to(device)   # 记录输入的数字
+        outputNumbers = torch.zeros((60000, 10)).to(device)  # 记录输出的结果
+        assignments = torch.zeros(400).to(device)
         # performance = np.zeros(6)  # 60000 / 10000 = 6
         
 
@@ -288,7 +251,7 @@ if __name__ == '__main__':
             # 获取图片和对应的one-hot标签
             img = img.to(device)
             label = label.to(device)
-            label_one_hot = F.one_hot(label, 10).double()
+            # label_one_hot = F.one_hot(label, 10).double()
 
             # 仿真一张图片
             current_spike_count = torch.zeros(400) # 记录累计的脉冲数量
@@ -315,8 +278,40 @@ if __name__ == '__main__':
 
         # 每个epoch输出一次performance
         performance = get_current_performance(outputNumbers, input_numbers)
-        print(performance)   # 每10000个sample记录一下performance
+        print(performance)   
         
+        
+    # 获得训练好的assignments
+    trained_assignments = assignments
+    result_monitor = torch.zeros((10000, 400)).to(device)   # 记录spike count
+    input_numbers = torch.zeros(60000).to(device)   # 记录输入的数字
+    outputNumbers = torch.zeros((60000, 10)).to(device)  # 记录输出的结果
     print("Testing...")
+    j = 0
+    for img, label in tqdm(test_data_loader):
+        # 获取图片和对应的one-hot标签
+        img = img.to(device)
+        label = label.to(device)
+        # label_one_hot = F.one_hot(label, 10).double()
 
+        # 仿真一张图片
+        current_spike_count = torch.zeros(400).to(device) # 记录累计的脉冲数量
+        for t in range(T):
+            encoded_img = encoder(img).double()
+            # print(encoded_img, encoded_img.shape)
+            # print(label)
+            output = model(encoded_img.reshape((784,)), t=t)
+            current_spike_count += output
+            # model.update()
+        
+        # 得到目前的spike count，训练标签，输出结果
+        result_monitor[j,:] = current_spike_count
+        input_numbers[j] = label
+        outputNumbers[j,:] = get_recognized_number_ranking(trained_assignments, result_monitor[j,:]) # 得到预测结果
+        
+        j += 1
+    
+    # 输出performance
+    performance = get_current_performance(outputNumbers, input_numbers)
+    print(performance)
 
