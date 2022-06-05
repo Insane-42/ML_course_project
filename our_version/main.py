@@ -152,13 +152,14 @@ def get_new_assignments(result_monitor, input_numbers):
     n_e = 400
     assignments = torch.zeros(n_e)
     input_nums = input_numbers
-    maximum_rate = [0] * n_e    
+    maximum_rate = torch.zeros(n_e)
+    rate = torch.zeros(n_e)
     for j in range(10):
         # input中各个类有多少个sample
         num_assignments = len(torch.where(input_nums == j)[0])
         if num_assignments > 0:
             # 计算对应这个类的平均每个sample的发放频率
-            rate = np.sum(result_monitor[input_nums == j], axis = 0) / num_assignments
+            rate = torch.sum(result_monitor[input_nums == j], axis = 0) / num_assignments
         for i in range(n_e):
             # 对于每个神经元，计算其发放频率最大的类，作为其assignment
             if rate[i] > maximum_rate[i]:
@@ -271,17 +272,15 @@ def train(args):
             current_spike_count = torch.zeros(400).to(device) # 记录累计的脉冲数量
             for t in range(T):
                 encoded_img = encoder(img).double()
-                # print(encoded_img, encoded_img.shape)
-                # print(label)
                 output = model(encoded_img.reshape((784,)), t=t)
                 current_spike_count += output
                 model.update()
-            
             # 每隔一个update_interval，更新assignments
-            if j % update_interval == 0 & j > 0:
+            if j % update_interval == 0 and j > 0:
                 # performance = get_current_performance(performance, outputNumbers, input_numbers, j, update_interval)
                 # print(performance)   # 每10000个sample记录一下performance
                 assignments = get_new_assignments(result_monitor[:], input_numbers[j-update_interval : j])
+                print(assignments)
             
             # 得到目前的spike count，训练标签，输出结果
             result_monitor[j % update_interval,:] = current_spike_count
@@ -351,8 +350,6 @@ def test(args):
         current_spike_count = torch.zeros(400).to(device) # 记录累计的脉冲数量
         for t in range(T):
             encoded_img = encoder(img).double()
-            # print(encoded_img, encoded_img.shape)
-            # print(label)
             output = model(encoded_img.reshape((784,)), t=t)
             current_spike_count += output
         
