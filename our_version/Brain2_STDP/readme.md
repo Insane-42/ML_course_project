@@ -1,4 +1,4 @@
-《Unsupervisedlearningofdigitrecognitionusingspike-timing-dependentplasticity》 realization on Brian2  
+#《Unsupervised learning of digit recognition using spike-timing-dependent plasticity》 realization on Brian2  
 
 Requirements : brian2,brian2tools,pickle  
 
