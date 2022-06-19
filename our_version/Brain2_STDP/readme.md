@@ -1,6 +1,6 @@
 # 《Unsupervised learning of digit recognition using spike-timing-dependent plasticity》 realization on Brian2  
 
-Requirements : *brian2, brian2tools, pickle  
+Requirements : *brian2, brian2tools, pickle*  
 
 Firstly, move MNIST dataset to the main derectory  
 Then, run ```python Brian2_trainning.py``` until the simulation finished  
