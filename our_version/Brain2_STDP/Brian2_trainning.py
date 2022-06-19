@@ -242,8 +242,8 @@ def network_creating():
         else:
             neu_group['e'].theta = np.ones((n_e)) * 20.0*brian2.mV
         for conn_type in rec_conn_name:
-            connName = name+conn_type[0]+name+conn_type[1]
-            we_matrix = matrix_loading(weight_path + '../random/' + connName + suff + '.npy')
+            conn_name = name+conn_type[0]+name+conn_type[1]
+            we_matrix = matrix_loading(weight_path + '../random/' + conn_name + suff + '.npy')
             model = 'w : 1'
             pre = 'g%s_post += w' % conn_type[0]
             post = ''
@@ -252,10 +252,10 @@ def network_creating():
                     model += eqs_stdp_ee
                     pre += '; ' + eqs_stdp_pre_ee
                     post = eqs_stdp_post_ee
-            connections[connName] = brian2.Synapses(neu_group[connName[0:2]], neu_group[connName[2:4]],
+            connections[conn_name] = brian2.Synapses(neu_group[conn_name[0:2]], neu_group[conn_name[2:4]],
                                                         model=model, on_pre=pre, on_post=post)
-            connections[connName].connect(True) 
-            connections[connName].w = we_matrix[connections[connName].i, connections[connName].j]
+            connections[conn_name].connect(True) 
+            connections[conn_name].w = we_matrix[connections[conn_name].i, connections[conn_name].j]
 
         print( 'create monitors ', name)
         r_moni[name+'e'] = brian2.PopulationRateMonitor(neu_group[name+'e'])
@@ -270,8 +270,8 @@ def connection_creating():
     for name in input_conn_name:
         print( 'create connections ', name[0], 'and', name[1])
         for conn_type in input_conn_names:
-            connName = name[0] + conn_type[0] + name[1] + conn_type[1]
-            we_matrix = matrix_loading(weight_path + connName + suff + '.npy')
+            conn_name = name[0] + conn_type[0] + name[1] + conn_type[1]
+            we_matrix = matrix_loading(weight_path + conn_name + suff + '.npy')
             model = 'w : 1'
             pre = 'g%s_post += w' % conn_type[0]
             post = ''
@@ -279,14 +279,14 @@ def connection_creating():
                 model += eqs_stdp_ee
                 pre += '; ' + eqs_stdp_pre_ee
                 post = eqs_stdp_post_ee
-            connections[connName] = brian2.Synapses(in_group[connName[0:2]], neu_group[connName[2:4]],
+            connections[conn_name] = brian2.Synapses(in_group[conn_name[0:2]], neu_group[conn_name[2:4]],
                                                         model=model, on_pre=pre, on_post=post)
             delay_minn = delay[conn_type][0]
             delay_maxx = delay[conn_type][1]
             delay_delta = delay_maxx - delay_minn
-            connections[connName].connect(True)
-            connections[connName].delay = 'delay_minn + rand() * delay_delta'
-            connections[connName].w = we_matrix[connections[connName].i, connections[connName].j]
+            connections[conn_name].connect(True)
+            connections[conn_name].delay = 'delay_minn + rand() * delay_delta'
+            connections[conn_name].w = we_matrix[connections[conn_name].i, connections[conn_name].j]
 
 def trainning():
 
