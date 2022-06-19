@@ -51,10 +51,7 @@ class new_LIFNode(neuron.LIFNode):
         self.E_inh = E_inh
 
     def neuronal_charge(self, ge_averaged, gi_average):
-        # print(self.v, ge_averaged, gi_average)
-        # 充电公式，见文中公式(1)，与源代码中neuron_eqs_e, neuron_eqs_i
         self.v = self.v + ((self.v_rest - self.v) + ge_averaged * (self.E_exc - self.v) + gi_average * (self.E_inh - self.v)) / self.tau 
-        # print(self.v)
 
     def neuronal_fire(self):
         return (self.v > self.v_threshold).double()
@@ -64,11 +61,9 @@ class new_LIFNode(neuron.LIFNode):
             spike_d = spike.detach()
         else:
             spike_d = spike
-        if self.v_reset is None:
-            # soft reset
+        if self.v_reset is None: # soft reset
             self.v = self.v - spike_d * self.v_threshold
-        else:
-            # hard reset
+        else: # hard reset
             self.v = (1. - spike_d) * self.v + spike_d * self.v_reset
 
     def forward(self, ge_averaged, gi_averaged):
@@ -76,6 +71,9 @@ class new_LIFNode(neuron.LIFNode):
         spike = self.neuronal_fire()
         self.neuronal_reset(spike)
         return spike
+
+    def reset(self):
+        self.v[:] = self.v_rest
 
 # 突触记录连接权重（使用STDP_layer更新权重）,区分为激发性突触和抑制性突触
 # 输入：突触前膜的脉冲， 输出：激发/抑制，突触权重，电流x
@@ -91,16 +89,10 @@ class Synapse(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.uniform_(self.weight.weight, a=0.0, b=1.0)
+        init.uniform_(self.weight.weight, a=0.1, b=1.0)
 
     def forward(self, input_spike, t):
-        # # update g_e, g_i
-        # ge and gi decay with time
-        # self.ge.weight *= (1-input_spike)*(1-1/1)
-        # self.gi.weight *= (1-input_spike)*(1-1/2)
-        # 根据前一个神经元的种类判断更新ge还是gi，对应位相乘，mask掉没有脉冲的突触权重
-        # spike*(g+w)+(1-spike)*g*衰减系数
-        mask = input_spike.unsqueeze(0) # (1, 768)
+        mask = input_spike.unsqueeze(0)
         if self.pre_type == "e":
             self.ge = mask*(self.ge+self.weight.weight)+(1.0-mask)*self.ge*(1.0-1.0/1)
         else:
@@ -115,30 +107,51 @@ class Synapse(nn.Module):
     def f_post(self, x):
         return - self.f_pre(x)
 
+    @torch.no_grad()
+    def norm_weight(self):
+        mean, std = torch.mean(self.weight.weight), torch.std(self.weight.weight)
+        self.weight.weight -= mean
+        self.weight.weight /= std
+        self.weight.weight -= torch.min(self.weight.weight)
+
     def update(self, spike_pre, spike_post):
         self.stdp_learner.stdp(spike_pre, spike_post, self.weight, self.lr)
+        self.norm_weight()
+
+    def reset(self):
+        self.ge[:,:] = 0.1
+        self.gi[:,:] = 0.1
+
+# @torch.no_grad()
+#     def stdp(self, s_pre: Tensor, s_post: Tensor, module: nn.Module, learning_rate: float):
+#         if isinstance(module, nn.Linear):
+#             # update trace
+#             self.trace_pre += - self.trace_pre / self.tau_pre + s_pre
+#             self.trace_post += - self.trace_post / self.tau_post + s_post
+
+#             # update weight
+#             delta_w_pre = self.f_pre(module.weight) * s_pre
+#             delta_w_post = self.f_post(module.weight) * s_post.unsqueeze(1)
+#             module.weight += (delta_w_pre + delta_w_post) * learning_rate
+
 
 class Net(nn.Module):
     def __init__(self, hidden=400, lr=0.02, device='cpu'):
         super().__init__()
-        # self.input_node = new_LIFNode(hidden_size = 784, device=device)
-        self.excit_node = new_LIFNode(tau=100.*1000, v_threshold=-52., v_reset=-65., v_rest=-65, E_exc=0, E_inh=-100., hidden_size = hidden, device=device)
-        self.inhib_node = new_LIFNode(tau=10.*1000, v_threshold=-40., v_reset=-45., v_rest=-60., E_exc=0, E_inh=-85., hidden_size = hidden, device=device)
+        self.excit_node = new_LIFNode(tau=100.*1000, v_threshold=-52., v_reset=-65., 
+                            v_rest=-65, E_exc=0, E_inh=-100., hidden_size = hidden, device=device)
+        self.inhib_node = new_LIFNode(tau=10.*1000, v_threshold=-40., v_reset=-45., 
+                            v_rest=-60., E_exc=0, E_inh=-85., hidden_size = hidden, device=device)
         self.synapse_1 = Synapse(784, hidden, pre_type='e', lr=lr, device = device)
         self.synapse_2 = Synapse(hidden, hidden, pre_type='e', lr=lr, device = device)
         self.synapse_3 = Synapse(hidden, hidden, pre_type='i', lr=lr, device = device)
 
     @torch.no_grad()
     def forward(self, x, t):
-        # self.spike_1 = self.input_node(x, x)
         self.spike_1 = x
         self.spike_2 = self.excit_node(*self.synapse_1(self.spike_1, t))
         self.spike_3 = self.inhib_node(*self.synapse_2(self.spike_2, t))
         self.spike_4 = self.excit_node(*self.synapse_3(self.spike_3, t))
-        # print(self.spike_1)
-        # print(self.spike_2)
-        # print(self.spike_3)
-        # print(self.spike_4)
         return self.spike_2
     
     def update(self):
@@ -146,6 +159,13 @@ class Net(nn.Module):
         self.synapse_2.update(self.spike_2, self.spike_3)
         self.synapse_3.update(self.spike_3, self.spike_4)
         return 
+
+    def reset(self):
+        self.synapse_1.reset()
+        self.synapse_2.reset()
+        self.synapse_3.reset()
+        self.excit_node.reset()
+        self.inhib_node.reset()
 
 # 得到每个神经元对应的类
 def get_new_assignments(result_monitor, input_numbers):
@@ -157,9 +177,12 @@ def get_new_assignments(result_monitor, input_numbers):
     for j in range(10):
         # input中各个类有多少个sample
         num_assignments = len(torch.where(input_nums == j)[0])
+        print(num_assignments, input_nums == j)
         if num_assignments > 0:
             # 计算对应这个类的平均每个sample的发放频率
             rate = torch.sum(result_monitor[input_nums == j], axis = 0) / num_assignments
+        print('rate:',rate)
+        print('maximum_rate:',rate)
         for i in range(n_e):
             # 对于每个神经元，计算其发放频率最大的类，作为其assignment
             if rate[i] > maximum_rate[i]:
@@ -235,7 +258,7 @@ def train(args):
         root=dataset_dir,
         train=True,
         transform=torchvision.transforms.ToTensor(),
-        download=False
+        download=True
     )
     train_data_loader = data.DataLoader(
         dataset=train_dataset,
@@ -256,7 +279,7 @@ def train(args):
         print("Epoch {}:".format(epoch))
         print("Training...")
         j = 0    # j 记录training sample的数量
-        update_interval = 10000
+        update_interval = 100
         result_monitor = torch.zeros((update_interval, 400)).to(device)   # 记录spike count,只需要记录一个update_interval的即可
         input_numbers = torch.zeros(60000).to(device)   # 记录输入的数字
         outputNumbers = torch.zeros((60000, 10)).to(device)  # 记录输出的结果
@@ -275,6 +298,10 @@ def train(args):
                 output = model(encoded_img.reshape((784,)), t=t)
                 current_spike_count += output
                 model.update()
+            # print('spike:',current_spike_count)
+            # print('weight:',model.synapse_1.weight.weight)
+            model.reset()
+
             # 每隔一个update_interval，更新assignments
             if j % update_interval == 0 and j > 0:
                 # performance = get_current_performance(performance, outputNumbers, input_numbers, j, update_interval)
