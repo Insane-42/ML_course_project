@@ -1,0 +1,9 @@
+torch==1.6.0
+torchvision==0.7.0
+spikingjelly==0.0.0.0.12
+Brian2==2.5.0.3
+brian2tools==0.3
+pickley==3.3.2
+tqdm==4.49.0
+scipy==1.6.3
+Pillow==8.2.0
